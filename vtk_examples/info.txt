@@ -1,1 +1,1 @@
-results of the fast marching algorithm on the unit cube. F(x)=1, h= 2^(ver-1
+results of the fast marching algorithm on the unit cube. F(x)=1, h= 2^(ver_nr-1)
