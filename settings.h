@@ -12,7 +12,7 @@ namespace settings{
     constexpr int y_grid_size {100};
     constexpr int z_grid_size {100};
     constexpr int total_grid_size {x_grid_size*y_grid_size*z_grid_size};
-    constexpr double h{1};
+    constexpr double h{1.0/99};
 }
 
 

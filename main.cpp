@@ -5,10 +5,11 @@
 #include <algorithm>
 #include <cmath>
 #include "settings.h"
-#include "HeapAndStruct.h"
+
+#include "HeapAndStructVector.h"
 #include <cassert>
 #include <vector>
-
+#include <fstream>
 
 //Helper function to return the respective array index
 int arr_index(int x, int y, int z)
@@ -284,6 +285,8 @@ int main()
 {
     //test with speed 1 and start in (0,0,0), should return distance from origin
     try {
+        std::cout<<sizeof(WeightedPoint)<<"\n";
+        //initialize all arrays
         MinHeap h(settings::total_grid_size);
         bool *mask_array{new bool[settings::total_grid_size]{}};
         mask_array[0] = true;
@@ -298,13 +301,30 @@ int main()
         }
         int accepted_counter{0};
 
+        //initialize output
+        std::ofstream myfile;
+        myfile.open("distance_cube_ver_8.txt");
+        myfile << "Dimension information\n"<<settings::x_grid_size <<"\n"<<settings::y_grid_size<<"\n"<<settings::z_grid_size<<"\n";
+        myfile << "Mask information\n";
+        for ( int i =0; i< settings::total_grid_size;++i)
+        {
+            myfile << mask_array[i]<<"\n";
+        }
         initialize(h, mask_array, speed_array, weight_array, accepted_counter);
         fast_marching(h, mask_array, speed_array, weight_array, accepted_counter);
 
 
-        std::cout<<"deviation: "<<weight_array[settings::total_grid_size-1]-sqrt(3)*(settings::x_grid_size-1);
-
+        std::cout<<"deviation: "<<weight_array[settings::total_grid_size-1]-sqrt(3)*((settings::x_grid_size-1)*settings::h);
+        //print result to output
+        myfile<<"Result information\n";
+        for ( int i =0; i< settings::total_grid_size;++i)
+        {
+            myfile << weight_array[i]<<"\n";
+        }
+        myfile.close();
     }
+
+
     catch (const char* exception)
     {
         std::cerr << "Error: " << exception << '\n';
