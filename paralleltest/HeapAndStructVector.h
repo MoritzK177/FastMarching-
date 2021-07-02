@@ -48,7 +48,8 @@ public:
 
     //Destructor
     ~MinHeap();
-
+    //returns size of heap
+    int get_size() {return heap_size;}
     // to heapify a subtree with the root at given index
     void MinHeapify(int );
 
@@ -83,6 +84,7 @@ public:
 };
 
 //A simple representation for the data of the Processes
+//TODO ALS ENUM
 /* legend of the statuses:
  * 0 = FAR
  * 1 = BAND_NEW
@@ -97,10 +99,18 @@ struct SubdomainData
     int x_offset{0};
     int y_offset{0};
     int z_offset{0};
+    int count_new{0};
     char *status_array{new char[settings::total_local_grid_size]{}};
     double *speed_array{new double[settings::total_local_grid_size]{}};
     double *weight_array{new double[settings::total_local_grid_size]{}};
     MinHeap h{settings::total_local_grid_size};
 
+};
+struct ExchangeData
+{
+    int x{-1};
+    int y{-1};
+    int z{-1};
+    double value{std::numeric_limits<double>::infinity()};
 };
 #endif //FASTMARCHINGPARALLEL1_HEAPANDSTRUCTVECTOR_H
