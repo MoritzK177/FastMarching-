@@ -369,9 +369,8 @@ double solve_eikonal_quadratic_3d(SubdomainData &subdomain, const int x, const i
 
 }
 
-void update_neighbors(int subdomain_index, SubdomainData subdomain_array[settings::total_num_processes], const int x, const int y, const int z){
+void update_neighbors(int subdomain_index, SubdomainData &subdomain, const int x, const int y, const int z){
 
-    SubdomainData &subdomain = subdomain_array[subdomain_index];
     std::vector<int> neighbors = get_node_neighbors(x, y, z);
     int curr_node_index = local_arr_index(x, y, z);
     for (auto i = 0; i < neighbors.size(); i += 3){
@@ -427,7 +426,7 @@ void initialize_heap(int subdomain_index, SubdomainData subdomain_array[settings
         for (int y = 0; y < settings::y_local_grid_size; ++y) {
             for (int z = 0; z < settings::z_local_grid_size; ++z) {
                 if (subdomain.status_array[local_arr_index(x, y, z)] == '3') {
-                    update_neighbors(subdomain_index, subdomain_array, x, y, z);
+                    update_neighbors(subdomain_index, subdomain, x, y, z);
                 }
             }
         }
@@ -525,15 +524,13 @@ void march_narrow_band(const int subdomain_index, SubdomainData subdomain_array[
         if(value> bound_band){
             break;
         }
-
-        char status = subdomain.status_array[curr_index];
         if(subdomain.status_array[curr_index]!= '5'){
             subdomain.status_array[curr_index] = '4';
         }
+
         WeightedPoint comp =subdomain.h.extractMin();
         subdomain.weight_array[curr_index]= value;
-
-        update_neighbors(subdomain_index,subdomain_array, curr_point.m_x, curr_point.m_y, curr_point.m_z);
+        update_neighbors(subdomain_index,subdomain, curr_point.m_x, curr_point.m_y, curr_point.m_z);
     }
 }
 
@@ -566,7 +563,7 @@ void march_narrow_band(const int subdomain_index, SubdomainData subdomain_array[
 
 int main() {
     //TODO was ist das
-    double width_band{720};
+    double width_band{std::numeric_limits<double>::infinity()};
     double stride{2.0/40};
     //double eps{1./1000};
     SubdomainData *subdomain_array{new SubdomainData[settings::total_num_processes]{}};
@@ -585,18 +582,30 @@ int main() {
 
 
     std::cout<<std::thread::hardware_concurrency()<<"\n";
-    std::thread *thread_array{new std::thread[settings::total_num_processes]{}};
-
+    //std::thread *thread_array{new std::thread[settings::total_num_processes]{}};
+    std::vector<std::thread> thread_array;
+    thread_array.resize(settings::total_num_processes);
     //INITIALIZE_INTERFACE
 
 
     for(int i=0; i<settings::total_num_processes; ++i){
-        initialize_subdomain( i, subdomain_array);
+        std::thread th(initialize_subdomain, i, subdomain_array);
+        thread_array[i]=std::move(th);
     }
-
+    for(int i=0; i<settings::total_num_processes; ++i) {
+        if(thread_array[i].joinable()) {
+            thread_array[i].join();
+        }
+    }
     //INITIALIZE HEAP
     for(int i=0; i<settings::total_num_processes; ++i){
-        initialize_heap( i, subdomain_array);
+        std::thread th(initialize_heap, i, subdomain_array);
+        thread_array[i]=std::move(th);
+    }
+    for(int i=0; i<settings::total_num_processes; ++i){
+        if(thread_array[i].joinable()) {
+            thread_array[i].join();
+        }
     }
 
     for(int i=0; i< settings::total_num_processes;++i) {
@@ -635,9 +644,14 @@ int main() {
 
         //march_band
         for(int i=0; i<settings::total_num_processes; ++i){
-            march_narrow_band(i, subdomain_array, bound_band);
+            std::thread th(march_narrow_band,i, subdomain_array, bound_band);
+            thread_array[i]=std::move(th);
         }
-
+        for(int i=0; i<settings::total_num_processes; ++i){
+            if(thread_array[i].joinable()) {
+                thread_array[i].join();
+            }
+        }
         //TODO besser vor schleife ziehen und dann clearen?!!
         std::vector <std::vector<std::vector<ExchangeData>>> exchange_vector;
         exchange_vector.resize(settings::total_num_processes);
@@ -648,21 +662,38 @@ int main() {
         }
         //exchange data
         for(int i=0; i<settings::total_num_processes; ++i){
-            collect_overlapping_data( i, subdomain_array, std::ref(exchange_vector));
+            std::thread th(collect_overlapping_data, i, subdomain_array, std::ref(exchange_vector));
+            thread_array[i]=std::move(th);
+        }
+        for(int i=0; i<settings::total_num_processes; ++i){
+            if(thread_array[i].joinable()) {
+                thread_array[i].join();
+            }
         }
         //integrate data
         for(int i=0; i<settings::total_num_processes; ++i){
-            integrate_overlapping_data( i,bound_band, subdomain_array, std::ref(exchange_vector[i]));
+            std::thread th(integrate_overlapping_data, i,bound_band, subdomain_array, std::ref(exchange_vector[i]));
+            thread_array[i]=std::move(th);
         }
-
+        for(int i=0; i<settings::total_num_processes; ++i){
+            if(thread_array[i].joinable()) {
+                thread_array[i].join();
+            }
+        }
 
         //march_band
         for(int i=0; i<settings::total_num_processes; ++i){
-           march_narrow_band(i, subdomain_array, bound_band);
+            std::thread th(march_narrow_band,i, subdomain_array, bound_band);
+            thread_array[i]=std::move(th);
+        }
+        for(int i=0; i<settings::total_num_processes; ++i){
+            if(thread_array[i].joinable()) {
+                thread_array[i].join();
+            }
         }
     }
     std::cout<<"pls"<<std::endl;
-    delete[] thread_array;
+    //delete[] thread_array;
 
 
 

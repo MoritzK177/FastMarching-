@@ -13,8 +13,8 @@ namespace settings{
 
     //The number of processes in each direction:
     constexpr int x_num_processes {2};
-    constexpr int y_num_processes {2};
-    constexpr int z_num_processes {2};
+    constexpr int y_num_processes {1};
+    constexpr int z_num_processes {1};
     constexpr int total_num_processes {x_num_processes*y_num_processes*z_num_processes};
 
     //The local grid sizes, assumes that each global grid size is divisible by the respective number of processes
