@@ -29,8 +29,8 @@
 double speed_funct(int x, int y, int z)
 {
     //return std::sin(x)+2*std::sin(y)+4*std::sin(z)+8;
-    return 0.001* (pow(std::sin(x),2)+pow(std::cos(y),2)+0.1);
-    //return 0.001;
+    //return 0.001* (pow(std::sin(x),2)+pow(std::cos(y),2)+0.1);
+    return 1.0;
 }
 bool in_mask(int x, int y , int z)
 {
@@ -183,10 +183,9 @@ int get_index(const int x, const int y, const int z, const int neighbor_x, const
     return res;
 
 }
-void initialize_subdomain(int subdomain_index, SubdomainData subdomain_array[settings::total_num_processes])
+void initialize_subdomain(SubdomainData &subdomain)
 {
     //some bools to check which point is outside of the global domain
-    SubdomainData &subdomain = subdomain_array[subdomain_index];
 
     bool at_x_lower_border{subdomain.x_offset == 0};
     bool at_x_upper_border{subdomain.x_offset == settings::x_global_grid_size-(settings::x_local_grid_size-2)};
@@ -370,7 +369,7 @@ double solve_eikonal_quadratic_3d(SubdomainData &subdomain, const int x, const i
 
 }
 
-void update_neighbors(int subdomain_index, SubdomainData &subdomain, const int x, const int y, const int z){
+void update_neighbors(SubdomainData &subdomain, const int x, const int y, const int z){
 
     std::vector<int> neighbors = get_node_neighbors(x, y, z);
     int curr_node_index = local_arr_index(x, y, z);
@@ -404,9 +403,8 @@ void update_neighbors(int subdomain_index, SubdomainData &subdomain, const int x
 
 }
 
-void initialize_heap(int subdomain_index, SubdomainData subdomain_array[settings::total_num_processes]){
+void initialize_heap(SubdomainData &subdomain){
 
-    SubdomainData &subdomain = subdomain_array[subdomain_index];
     //wollte hier multi-threaden. Das kreirt aber zu viele THreads und das Programm stürzt ab
     /*std::vector<std::thread> thread_vector;
     for(int x=0 ; x<settings::x_local_grid_size; ++x) {
@@ -427,7 +425,7 @@ void initialize_heap(int subdomain_index, SubdomainData subdomain_array[settings
         for (int y = 0; y < settings::y_local_grid_size; ++y) {
             for (int z = 0; z < settings::z_local_grid_size; ++z) {
                 if (subdomain.status_array[local_arr_index(x, y, z)] == '3') {
-                    update_neighbors(subdomain_index, subdomain, x, y, z);
+                    update_neighbors(subdomain, x, y, z);
                 }
             }
         }
@@ -435,9 +433,8 @@ void initialize_heap(int subdomain_index, SubdomainData subdomain_array[settings
 
 }
 
-void collect_overlapping_data(const int subdomain_index, SubdomainData subdomain_array[settings::total_num_processes], std::vector <std::vector<std::vector<ExchangeData>>> &exchange_vector){
-    SubdomainData &subdomain = subdomain_array[subdomain_index];
-    //TODO count sollte in thread data sein
+void collect_overlapping_data(SubdomainData &subdomain, std::vector <std::vector<std::vector<ExchangeData>>> &exchange_vector){
+
     subdomain.count_new=0;
     //recover the domains' indices:
     const int x_index = subdomain.x_offset/(settings::x_local_grid_size -2);
@@ -463,7 +460,6 @@ void collect_overlapping_data(const int subdomain_index, SubdomainData subdomain
                     for (std::size_t i = 0; i < neighbors.size(); i += 3) {
                         //TODO Can maybe be parallelized more
                         int neighbor_index = process_index( neighbors[i], neighbors[i + 1], neighbors[i + 2]);
-                        //TODO HIER GROßER FEHLER!!!
                         //assert(is_in_neighbor(x, y, z, x_index - neighbors[i], y_index - neighbors[i + 1],z_index - neighbors[i + 2]));
 
                         if (is_in_neighbor(x, y, z, x_index - neighbors[i], y_index - neighbors[i + 1],z_index - neighbors[i + 2])) {
@@ -479,8 +475,8 @@ void collect_overlapping_data(const int subdomain_index, SubdomainData subdomain
         }
     }
 }
-void integrate_overlapping_data(const int subdomain_index, double bound_band, SubdomainData subdomain_array[settings::total_num_processes], std::vector<std::vector<ExchangeData>> &exchange_vector) {
-    SubdomainData &subdomain = subdomain_array[subdomain_index];
+void integrate_overlapping_data(SubdomainData &subdomain, double bound_band, std::vector<std::vector<ExchangeData>> &exchange_vector) {
+
     //TODO can be further parallelized, look at suggestions
     for(int i=0; i<exchange_vector.size();++i){
         for(int j=0; j < exchange_vector[i].size();++j){
@@ -512,8 +508,8 @@ void integrate_overlapping_data(const int subdomain_index, double bound_band, Su
         }
     }
 }
-void march_narrow_band(const int subdomain_index, SubdomainData subdomain_array[settings::total_num_processes], double bound_band) {
-    SubdomainData &subdomain = subdomain_array[subdomain_index];
+void march_narrow_band(SubdomainData &subdomain, double bound_band) {
+
     while(true){
         if(subdomain.h.get_size()==0){
             break;
@@ -529,9 +525,9 @@ void march_narrow_band(const int subdomain_index, SubdomainData subdomain_array[
             subdomain.status_array[curr_index] = '4';
         }
 
-        WeightedPoint comp =subdomain.h.extractMin();
+        subdomain.h.extractMin();
         subdomain.weight_array[curr_index]= value;
-        update_neighbors(subdomain_index,subdomain, curr_point.m_x, curr_point.m_y, curr_point.m_z);
+        update_neighbors(subdomain, curr_point.m_x, curr_point.m_y, curr_point.m_z);
     }
 }
 
@@ -565,7 +561,7 @@ void march_narrow_band(const int subdomain_index, SubdomainData subdomain_array[
 int main() {
     //TODO was ist das
     double width_band{std::numeric_limits<double>::infinity()};
-    double stride{2.0/40};
+    double stride{0};
     //double eps{1./1000};
     SubdomainData *subdomain_array{new SubdomainData[settings::total_num_processes]{}};
     //total size needed for heap for the lookup table
@@ -590,21 +586,31 @@ int main() {
 
     auto startTime = std::chrono::system_clock::now();
 
-    #pragma omp parallel for num_threads(8)
-    for(int i=0; i<settings::total_num_processes; ++i){
-        initialize_subdomain( i, subdomain_array);
+    //MEsskrams:
+    auto startTime_init = std::chrono::system_clock::now();
+
+    #pragma omp parallel for  //num_threads(4)
+    for(int i=0; i<4; ++i){
+        initialize_subdomain( subdomain_array[i]);
     }
 
     //INITIALIZE HEAP
-    #pragma omp parallel for num_threads(8)
-    for(int i=0; i<settings::total_num_processes; ++i){
-        initialize_heap( i, subdomain_array);
+    #pragma omp parallel for //num_threads(4)
+    for(int i=0; i<4; ++i){
+        initialize_heap( subdomain_array[i]);
     }
+    auto endTime_init = std::chrono::system_clock::now();
+
+    std::chrono::duration<double> elapsed_seconds_init = endTime_init - startTime_init;
+
+    std::chrono::duration<double> elapsed_seconds_march = std::chrono::duration<double, std::nano>::zero();
+    std::chrono::duration<double> elapsed_seconds_collect = std::chrono::duration<double, std::nano>::zero();
+    std::chrono::duration<double> elapsed_seconds_integrate = std::chrono::duration<double, std::nano>::zero();
+    std::chrono::duration<double> elapsed_seconds_rest = std::chrono::duration<double, std::nano>::zero();
 
 
-    for(int i=0; i< settings::total_num_processes;++i) {
-        //collect_overlapping_data(i, subdomain_array);
-    }
+
+
     //test(0,subdomain_array);
     /*std::vector<int> neighbors = get_process_neighbors(0,0,0);
     for (std::size_t i = 0; i < neighbors.size(); i += 3) {
@@ -612,6 +618,7 @@ int main() {
     }*/
 
     while(true){
+        auto startTime_rest = std::chrono::system_clock::now();
         //TODO globale reduzierung
         double min_array[settings::total_num_processes];
         int count_array[settings::total_num_processes];
@@ -636,48 +643,76 @@ int main() {
         //std::cout<<"min_val +stride: "<< *min_val_global +stride<< std::endl;
         //std::cout<<"bound_band: "<< bound_band<< std::endl;
 
+        auto endTime_rest = std::chrono::system_clock::now();
+
+        elapsed_seconds_rest += endTime_rest-startTime_rest;
+
+        auto startTime_march = std::chrono::system_clock::now();
         //march_band
-        #pragma omp parallel for num_threads(8)
-        for(int i=0; i<settings::total_num_processes; ++i){
-            march_narrow_band(i, subdomain_array, bound_band);
+        #pragma omp parallel for //num_threads(4)
+        for(int i=0; i<4; ++i){
+            march_narrow_band(subdomain_array[i], bound_band);
         }
+        auto endTime_march = std::chrono::system_clock::now();
+
+        elapsed_seconds_march += endTime_march - startTime_march;
 
         //TODO besser vor schleife ziehen und dann clearen?!!
         std::vector <std::vector<std::vector<ExchangeData>>> exchange_vector;
         exchange_vector.resize(settings::total_num_processes);
 
 
+
         for(int i=0; i< settings::total_num_processes; ++i){
             exchange_vector[i].resize(26);
         }
+
+        auto startTime_collect = std::chrono::system_clock::now();
         //exchange data
-        #pragma omp parallel for num_threads(8)
-        for(int i=0; i<settings::total_num_processes; ++i){
-            collect_overlapping_data(i, subdomain_array, std::ref(exchange_vector));
+        #pragma omp parallel for //num_threads(4)
+        for(int i=0; i<4; ++i){
+            collect_overlapping_data(subdomain_array[i], std::ref(exchange_vector));
         }
+        auto endTime_collect = std::chrono::system_clock::now();
+
+        elapsed_seconds_collect += endTime_collect - startTime_collect;
+
+        auto startTime_integrate = std::chrono::system_clock::now();
 
         //integrate data
-        #pragma omp parallel for num_threads(8)
-        for(int i=0; i<settings::total_num_processes; ++i){
-            integrate_overlapping_data( i,bound_band, subdomain_array, std::ref(exchange_vector[i]));
+        #pragma omp parallel for //num_threads(4)
+        for(int i=0; i<4; ++i){
+            integrate_overlapping_data(subdomain_array[i],bound_band, std::ref(exchange_vector[i]));
         }
+        auto endTime_integrate = std::chrono::system_clock::now();
+        elapsed_seconds_integrate += endTime_integrate - startTime_integrate;
 
+        startTime_march = std::chrono::system_clock::now();
         //march_band
-        #pragma omp parallel for num_threads(8)
-        for(int i=0; i<settings::total_num_processes; ++i){
-            march_narrow_band(i, subdomain_array, bound_band);
+        #pragma omp parallel for //num_threads(4)
+        for(int i=0; i<4; ++i){
+            march_narrow_band(subdomain_array[i], bound_band);
         }
+        endTime_march = std::chrono::system_clock::now();
+        elapsed_seconds_march += endTime_march - startTime_march;
+
 
     }
     auto endTime = std::chrono::system_clock::now();
     std::chrono::duration<double> elapsed_seconds = endTime - startTime;
 
-    std::cout<<elapsed_seconds.count()<<std::endl;
+    std::cout<<"STRIDE: "<< stride<<std::endl;
+    std::cout<<"TOTAL: "<< elapsed_seconds.count()<<std::endl;
+    std::cout<<"MARCH: "<< elapsed_seconds_march.count()<<std::endl;
+    std::cout<<"COLLECT: "<< elapsed_seconds_collect.count()<<std::endl;
+    std::cout<<"INTEGRATE: "<< elapsed_seconds_integrate.count()<<std::endl;
+    std::cout<<"INIT: "<< elapsed_seconds_init.count()<<std::endl;
+    std::cout<<"CRITERIUM: "<< elapsed_seconds_rest.count()<<std::endl;
     //delete[] thread_array;
 
 
 
-    double weight_array[settings::total_global_grid_size];
+    double* weight_array{new double[settings::total_global_grid_size]{}};
     for(int x =0; x<settings::x_global_grid_size;++x){
         for(int y =0; y<settings::y_global_grid_size;++y){
             for(int z =0; z<settings::z_global_grid_size;++z){
