@@ -10,6 +10,7 @@
 #include<cfloat>
 #include <array>
 #include <vector>
+#include <cassert>
 int local_arr_index(int, int, int);//forward declaration
 
 // Constructor: Builds a heap from a given array a[] of given size
@@ -40,6 +41,7 @@ int MinHeap::get_heap_index(const int x, const int y, const int z) const
 // Inserts a new point 'point'
 void MinHeap::insertKey(const WeightedPoint point)
 {
+    assert(table[local_arr_index(point.m_x,point.m_y,point.m_z)]==-1);
     if (heap_size == capacity)
     {
         std::cout << "\nOverflow: Could not insertKey\n";
@@ -80,8 +82,9 @@ WeightedPoint MinHeap::extractMin()
         throw "TRYING TO EXTRACT THE MINIMUM OF AN EMPTY HEAP";
     if (heap_size == 1)
     {
-        heap_size--;
+        --heap_size;
         table[local_arr_index(harr[0].m_x,harr[0].m_y,harr[0].m_z)]=-1;
+        harr.pop_back();
         return harr[0];
     }
 
@@ -89,7 +92,7 @@ WeightedPoint MinHeap::extractMin()
     WeightedPoint root = harr[0];
     harr[0] = harr[heap_size-1];
     harr.pop_back();
-    heap_size--;
+    --heap_size;
     MinHeapify(0);
     table[local_arr_index(root.m_x,root.m_y,root.m_z)]=-1;
 

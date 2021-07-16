@@ -92,7 +92,7 @@ public:
  * 3 = KNOWN_FIX
  * 4 = KNOWN_NEW
  * 5 = KNOWN_OLD
- * 6 = The ghost points outside of the original domain*/
+ * */
 
 struct SubdomainData
 {
