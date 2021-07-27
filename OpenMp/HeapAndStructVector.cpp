@@ -91,6 +91,7 @@ WeightedPoint MinHeap::extractMin()
     // Store the minimum value, and remove it from heap
     WeightedPoint root = harr[0];
     harr[0] = harr[heap_size-1];
+    table[local_arr_index( harr[0].m_x,harr[0].m_y, harr[0].m_z)]=0;
     harr.pop_back();
     --heap_size;
     MinHeapify(0);

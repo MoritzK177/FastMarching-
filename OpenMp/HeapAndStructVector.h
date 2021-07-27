@@ -100,8 +100,11 @@ struct SubdomainData
     int y_offset{0};
     int z_offset{0};
     int count_new{0};
+    //char status_array [settings::total_local_grid_size];
     char *status_array{new char[settings::total_local_grid_size]{}};
+    //double speed_array [settings::total_local_grid_size];
     double *speed_array{new double[settings::total_local_grid_size]{}};
+    //double weight_array [settings::total_local_grid_size];
     double *weight_array{new double[settings::total_local_grid_size]{}};
     MinHeap h{settings::total_local_grid_size};
 
