@@ -44,9 +44,9 @@ double speed_funct(int x, int y, int z)
 {
     //return 1+ 0.5*std::sin(20*M_PI*x)*std::sin(20*M_PI*y)*std::sin(20*M_PI*z);
     //return 0.001*(pow(std::sin(x),2)+pow(std::cos(y),2)+0.1);
-    //return 1.0;
-    if(in_barrier(x,y,z)) return 0;
-    else return 1;
+    return 1.0;
+    //if(in_barrier(x,y,z)) return 0;
+    //else return 1;
 }
 bool in_mask(int x, int y , int z)
 {
@@ -59,7 +59,11 @@ bool in_mask(int x, int y , int z)
     //bool in_ball= (pow(x*settings::h -0.25,2)+ pow(y*settings::h -0.25,2)+pow(z*settings::h -0.25,2))<=1.0/256;
     //bool in_cube = x*settings::h<=0.875&&x*settings::h >=0.625&& y*settings::h<=0.875&&y*settings::h >=0.625&& z*settings::h<=0.875&&z*settings::h >=0.625;
     //return in_ball ||in_cube;
-    return x== settings::x_global_grid_size/2&&y== settings::y_global_grid_size/2&&z== settings::z_global_grid_size/2;
+    //return x== settings::x_global_grid_size/2&&y== settings::y_global_grid_size/2&&z== settings::z_global_grid_size/2;
+    //bool in_ball2= (pow(x*settings::h -0.5,2)+ pow(y*settings::h -0.5,2)+pow(z*settings::h -0.5,2))<=1.0/16;
+    //return in_ball2;
+    bool in_cube2 = (x==63 ||x==64)&&(y==63 ||y==64)&&(z==63||z==64);
+    return in_cube2;
 }
 
 //Helper function to return the respective array indices
@@ -77,38 +81,42 @@ int process_index(const int x, const int y, const int z)
     return x+y*settings::x_num_processes+z*settings::x_num_processes*settings::y_num_processes;
 }
 bool at_subdomain_border(const int x,const int y,const int z){
-    return(x==0 || y==0 || z==0 || x==(settings::x_local_grid_size-1) || y==(settings::y_local_grid_size-1) || z==(settings::z_local_grid_size-1));
+    bool at_lower_borders = x==0 || y==0 || z==0 || x==1 || y==1||z==1;
+    bool at_upper_borders = x==(settings::x_local_grid_size-1) || y==(settings::y_local_grid_size-1) || z==(settings::z_local_grid_size-1) || x==(settings::x_local_grid_size-2) || y==(settings::y_local_grid_size-2) || z==(settings::z_local_grid_size-2);
+    return(at_lower_borders||at_upper_borders);
 }
 
 bool is_in_neighbor(const int node_x, const int node_y, const int node_z, const int proc_x_diff, const int proc_y_diff, const int proc_z_diff){
     //process cant be its own neighbor
     assert(proc_x_diff !=0 ||proc_y_diff !=0 ||proc_z_diff !=0);
+    assert(std::abs(proc_x_diff)<= 1 && std::abs(proc_y_diff)<=1 &&std::abs(proc_z_diff)<=1);
+
     int x_max = settings::x_local_grid_size-1;
     int y_max = settings::y_local_grid_size-1;
     int z_max = settings::z_local_grid_size-1;
 
     bool res_x{true};
     if(proc_x_diff == 1){
-        res_x = (node_x == 0);
+        res_x = (node_x == 0||node_x == 1);
     }
     else if(proc_x_diff == -1){
-        res_x = (node_x == x_max);
+        res_x = (node_x == x_max||node_x == x_max-1);
     }
 
     bool res_y{true};
     if(proc_y_diff == 1){
-        res_y = (node_y == 0);
+        res_y = (node_y == 0||node_y == 1);
     }
     else if(proc_y_diff == -1){
-        res_y = (node_y == y_max);
+        res_y = (node_y == y_max||node_y == y_max-1);
     }
 
     bool res_z{true};
     if(proc_z_diff == 1){
-        res_z = (node_z == 0);
+        res_z = (node_z == 0||node_z == 1);
     }
     else if(proc_z_diff == -1){
-        res_z = (node_z == z_max);
+        res_z = (node_z == z_max||node_z ==z_max-1);
     }
 
     return (res_x && res_y && res_z);
@@ -453,8 +461,8 @@ void initialize_heap(SubdomainData &subdomain){
     }
 
 }
-
-void collect_overlapping_data(SubdomainData &subdomain, std::vector <std::vector<std::vector<ExchangeData>>> &exchange_vector){
+//also collects data at boundary with no neighboring domain >:-( maybe probably makes count_new too big
+void collect_overlapping_data1(SubdomainData &subdomain, std::vector <std::vector<std::vector<ExchangeData>>> &exchange_vector){
     subdomain.count_new=0;
     //recover the domains' indices:
     const int x_index = subdomain.x_offset/(settings::x_local_grid_size -2);
@@ -468,6 +476,80 @@ void collect_overlapping_data(SubdomainData &subdomain, std::vector <std::vector
 
                 char curr_node_status{subdomain.status_array[local_arr_index(x,y,z)]};
                 if(at_subdomain_border(x,y,z) && (curr_node_status == '1' || curr_node_status == '4')) {
+                    //++subdomain.count_new;
+                    bool increase_count_new = false;
+
+                    for (std::size_t i = 0; i < neighbors.size(); i += 3) {
+                        //TODO Can maybe be parallelized more
+                        int neighbor_index = process_index( neighbors[i], neighbors[i + 1], neighbors[i + 2]);
+                        //assert(is_in_neighbor(x, y, z, x_index - neighbors[i], y_index - neighbors[i + 1],z_index - neighbors[i + 2]));
+
+                        if (is_in_neighbor(x, y, z, x_index - neighbors[i], y_index - neighbors[i + 1],z_index - neighbors[i + 2])) {
+                            if(!increase_count_new){
+                                increase_count_new = true; //only if our border point is in a neighboring process we should increase count_new
+                            }
+                            int process_index_in_neighbor = get_index(neighbors[i], neighbors[i + 1], neighbors[i + 2], x_index, y_index, z_index);
+                            //give the GLOBAL coordinates as ExchangeData
+                            ExchangeData data{x+subdomain.x_offset-1, y+subdomain.y_offset-1, z+subdomain.z_offset-1, subdomain.weight_array[local_arr_index(x, y, z)]};
+                            exchange_vector[neighbor_index][process_index_in_neighbor].push_back(data);
+                        }
+                    }
+
+                    if(increase_count_new){ //We should only increase the count and update the status if the point is in a neighbouring domain
+                        ++subdomain.count_new;
+                        if (curr_node_status == '1') {
+                            subdomain.status_array[local_arr_index(x, y, z)] = '2';
+                        }
+                        else {
+                            assert(curr_node_status == '4');
+                            subdomain.status_array[local_arr_index(x, y, z)] = '5';
+                        }
+                    }
+
+                }
+            }
+        }
+    }
+}
+
+void get_points_in_neighboring_processes(const int domain_x_index, const int domain_y_index, const int domain_z_index, std::vector<int> neighbors, bool res_array[settings::total_local_grid_size]){
+
+    for(int i=0;i<settings::total_local_grid_size;++i){
+        res_array[i] = false;
+    }
+
+    for (std::size_t i = 0; i < neighbors.size(); i += 3) {
+        for(int x=0; x<settings::x_local_grid_size; ++x) {
+            for (int y = 0; y < settings::y_local_grid_size; ++y) {
+                for (int z = 0; z < settings::z_local_grid_size; ++z) {
+                    if (!res_array[local_arr_index(x,y,z)])
+                    {
+                        res_array[local_arr_index(x,y,z)] = is_in_neighbor(x, y, z, domain_x_index - neighbors[i], domain_y_index - neighbors[i + 1],domain_z_index - neighbors[i + 2]);
+                    }
+
+                }
+            }
+        }
+
+    }
+
+}
+void collect_overlapping_data2(SubdomainData &subdomain, std::vector <std::vector<std::vector<ExchangeData>>> &exchange_vector){
+    subdomain.count_new=0;
+    //recover the domains' indices:
+    const int x_index = subdomain.x_offset/(settings::x_local_grid_size -2);
+    const int y_index = subdomain.y_offset/(settings::y_local_grid_size -2);
+    const int z_index = subdomain.z_offset/(settings::z_local_grid_size -2);
+    //get neighboring proccesses:
+    std::vector<int> neighbors = get_process_neighbors(x_index, y_index, z_index);
+    bool *points_in_neighbor_process{new bool[settings::total_local_grid_size]{}};
+    get_points_in_neighboring_processes(x_index, y_index, z_index, neighbors, points_in_neighbor_process);
+    //std::vector<bool> points_in_neighbor_process = get_points_in_neighboring_processes(x_index, y_index, z_index, neighbors);
+    for(int x=0; x<settings::x_local_grid_size; ++x) {
+        for (int y = 0; y < settings::y_local_grid_size; ++y) {
+            for (int z = 0; z < settings::z_local_grid_size; ++z) {
+                char curr_node_status{subdomain.status_array[local_arr_index(x,y,z)]};
+                if(points_in_neighbor_process[local_arr_index(x,y,z)] && (curr_node_status == '1' || curr_node_status == '4')){
                     ++subdomain.count_new;
                     if (curr_node_status == '1') {
                         subdomain.status_array[local_arr_index(x, y, z)] = '2';
@@ -489,18 +571,18 @@ void collect_overlapping_data(SubdomainData &subdomain, std::vector <std::vector
                             exchange_vector[neighbor_index][process_index_in_neighbor].push_back(data);
                         }
                     }
-
                 }
             }
         }
     }
+    delete[]points_in_neighbor_process;
 }
 void integrate_overlapping_data(SubdomainData &subdomain, double bound_band, std::vector<std::vector<ExchangeData>> &exchange_vector) {
     //TODO can be further parallelized, look at suggestions
     for(int i=0; i<exchange_vector.size();++i){
         for(int j=0; j < exchange_vector[i].size();++j){
             ExchangeData temp_data = exchange_vector[i][j];
-            //hier Logikfehler behoben?!
+            //transform the GLOBAL coordinates into local ones
             int temp_x = temp_data.x-subdomain.x_offset+1;
             int temp_y = temp_data.y-subdomain.y_offset+1;
             int temp_z = temp_data.z-subdomain.z_offset+1;
@@ -539,7 +621,7 @@ void march_narrow_band(SubdomainData &subdomain, double bound_band) {
             break;
         }
         WeightedPoint curr_point = subdomain.h.getMin();
-        int check24 = subdomain.h.get_heap_index(1,8,20);
+        //int check24 = subdomain.h.get_heap_index(1,8,20);
         int curr_index= local_arr_index(curr_point.m_x, curr_point.m_y, curr_point.m_z);
         double value = curr_point.weight;
 
@@ -555,14 +637,78 @@ void march_narrow_band(SubdomainData &subdomain, double bound_band) {
         update_neighbors(subdomain, curr_point.m_x, curr_point.m_y, curr_point.m_z);
     }
 }
+/*
+void test1(){
+    int x_index=1;
+    int y_index = 1;
+    int z_index = 1;
+    std::vector<int> neighbors = get_process_neighbors(x_index, y_index, z_index);
+    for(int i=0; i<neighbors.size(); i+=3){
+        std::cout<<"NEIGHBOR_X: "<<neighbors[i]<<std::endl;
+        std::cout<<"NEIGHBOR_Y: "<<neighbors[i+1]<<std::endl;
+        std::cout<<"NEIGHBOR_Z: "<<neighbors[i+2]<<std::endl<<std::endl;
+        for(int x=0;x<settings::x_local_grid_size;++x){
+            for(int y=0;y<settings::y_local_grid_size;++y){
+                for(int z=0;z<settings::z_local_grid_size;++z){
+                    if (is_in_neighbor(x, y, z, x_index - neighbors[i], y_index - neighbors[i + 1],z_index - neighbors[i + 2])) {
+                        std::cout<<"X: "<< x<<" Y: "<<y<<" Z: "<<z<<std::endl<<std::endl;
+                    }
+                }
+            }
+        }
+    }
+}
+void test2(){
+    int count;
+    for(int x=0;x<settings::x_local_grid_size;++x){
+        for(int y=0;y<settings::y_local_grid_size;++y){
+            for(int z=0;z<settings::z_local_grid_size;++z){
+                if (at_subdomain_border(x,y,z)) {
+                    std::cout<<"X: "<< x<<" Y: "<<y<<" Z: "<<z<<std::endl<<std::endl;
+                    ++count;
+                }
+            }
+        }
+    }
+    std::cout<<count;
+}
+void test3(){
+    int count{0};
+    int x_index=1;
+    int y_index = 2;
+    int z_index = 2;
+    std::vector<int> neighbors = get_process_neighbors(x_index, y_index, z_index);
+    bool *array{new bool[settings::total_local_grid_size]{}};
+    get_points_in_neighboring_processes(x_index,y_index,z_index,neighbors, array);
+    for(int x=0;x<settings::x_local_grid_size;++x){
+        for(int y=0;y<settings::y_local_grid_size;++y){
+            for(int z=0;z<settings::z_local_grid_size;++z){
+                if (array[local_arr_index(x,y,z)]) {
+                    //std::cout<<"X: "<< x<<" Y: "<<y<<" Z: "<<z<<std::endl<<std::endl;
+                    ++count;
+                }
+            }
+        }
+    }
+    std::cout<<count;
 
+}
+int main(){
+    //test1();
+    //test2();
+    //test3();
+    return 0;
+}*/
 
 int main() {
     //TODO was ist das
     double width_band{std::numeric_limits<double>::infinity()};
     double stride{2*settings::h};
     //double eps{1./1000};
-    SubdomainData *subdomain_array{new SubdomainData[settings::total_num_processes]{}};
+    //all the largest elements there get allocated with new
+    SubdomainData subdomain_array [settings::total_num_processes];
+    //alt:
+    //SubdomainData *subdomain_array{new SubdomainData[settings::total_num_processes]{}};
     std::vector<std::vector<std::vector<ExchangeData>>> exchange_vector;
     exchange_vector.resize(settings::total_num_processes);
 
@@ -588,22 +734,23 @@ int main() {
     //INITIALIZE_INTERFACE
 
     auto startTime = std::chrono::system_clock::now();
-
-#pragma omp parallel default(none) shared(subdomain_array, stride, width_band, exchange_vector) //num_threads(4)
+    double startTimeMarch = 0;
+    std::cout<<"MARCH: " << startTimeMarch<<std::endl;
+#pragma omp parallel default(none) shared(subdomain_array, stride, width_band, exchange_vector)// startTimeMarch) //num_threads(4)
     {
 #pragma omp master
-#pragma omp taskloop
+//#pragma omp taskloop
             //INITIALIZE HEAP AND SUBDOMAINS
+#pragma omp parallel for
             for (int i = 0; i < settings::total_num_processes; ++i) {
                 initialize_subdomain(subdomain_array[i]);
                 initialize_heap(subdomain_array[i]);
             }
-#pragma omp taskwait
+//#pragma omp taskwait
 
 #pragma omp master
         while (true) {
 
-            //TODO globale reduzierung
             double min_array[settings::total_num_processes];
             int count_array[settings::total_num_processes];
             //std::array <double,settings::total_num_processes> min_array;
@@ -630,14 +777,17 @@ int main() {
             }
             //std::cout << "MIN VAL GLOBAL: "<< *min_val_global<<std::endl;
             //int *count_global = std::max_element(std::begin(count_array), std::end(count_array));
-            //std::cout << "Count GLOBAL: "<< *count_global<<std::endl;
+
             if ((min_val_global >= width_band) && (count_global == 0)) {
                 break;
             }
             double bound_band = std::min(min_val_global + stride, width_band);
 
+            //std::cout << "Count GLOBAL: "<< count_global<<std::endl;
             //march_band
-#pragma omp taskloop
+            //auto march_timer_start = std::chrono::system_clock::now();
+//#pragma omp taskloop
+#pragma omp parallel for
             for (int i = 0; i < 2*settings::total_num_processes; ++i) {
                 if(i<settings::total_num_processes) {
                     march_narrow_band(subdomain_array[i], bound_band);
@@ -646,8 +796,11 @@ int main() {
                     exchange_vector[i%settings::total_num_processes].resize(26);
                 }
             }
-#pragma omp taskwait
-
+//#pragma omp taskwait
+            //auto march_timer_end = std::chrono::system_clock::now();
+            //std::chrono::duration<double> elapsed_seconds = march_timer_end-march_timer_start;
+            //startTimeMarch += elapsed_seconds.count();
+            //std::cout<<"MARCH: " << (march_timer_end-march_timer_start).count()<<std::endl;
 
 
             //for (int i = 0; i < settings::total_num_processes; ++i) {
@@ -655,31 +808,40 @@ int main() {
             //}
 
 //exchange data
-#pragma omp taskloop
+//#pragma omp taskloop
+#pragma omp parallel for
             for (int i = 0; i < settings::total_num_processes; ++i) {
-                collect_overlapping_data(subdomain_array[i], std::ref(exchange_vector));
+                collect_overlapping_data1(subdomain_array[i], std::ref(exchange_vector));
             }
-#pragma omp taskwait
+//#pragma omp taskwait
 
 
             //integrate data
-#pragma omp taskloop
+//#pragma omp taskloop
+#pragma omp parallel for
             for (int i = 0; i < settings::total_num_processes; ++i) {
                 integrate_overlapping_data(subdomain_array[i], bound_band, std::ref(exchange_vector[i]));
                 exchange_vector[i].clear();
             }
-#pragma omp taskwait
+//#pragma omp taskwait
 
             //for (int i = 0; i < settings::total_num_processes; ++i) {
             //    exchange_vector[i].clear();
             //}
 
             //march_band
-#pragma omp taskloop
+
+
+//#pragma omp taskloop
+            //march_timer_start = std::chrono::system_clock::now();
+#pragma omp parallel for
             for (int i = 0; i < settings::total_num_processes; ++i) {
                 march_narrow_band(subdomain_array[i], bound_band);
             }
-#pragma omp taskwait
+//#pragma omp taskwait
+            // = std::chrono::system_clock::now();
+            //elapsed_seconds = march_timer_end-march_timer_start;
+            //startTimeMarch += elapsed_seconds.count();
 
         //}
         }
@@ -690,6 +852,7 @@ int main() {
     std::chrono::duration<double> elapsed_seconds = endTime - startTime;
 
     std::cout<<"STRIDE: "<< stride<<std::endl;
+    std::cout<<"MARCH: " << startTimeMarch<<std::endl;
     std::cout<<"TOTAL: "<< elapsed_seconds.count()<<std::endl;
     //delete[] thread_array;
 
@@ -738,7 +901,8 @@ int main() {
     //for(int i=0; i < settings::total_global_grid_size;++i){
     //    std::cout << "WEIGHT: " << weight_array[i] << std::endl;
     //}
-    /*std::ofstream myfile;
+
+    std::ofstream myfile;
     myfile.open("barrier.txt");
     myfile << "Dimension information\n"<<settings::x_global_grid_size <<"\n"<<settings::y_global_grid_size<<"\n"<<settings::z_global_grid_size<<"\n";
     myfile << "Mask information\n";
@@ -755,7 +919,7 @@ int main() {
     {
         myfile << weight_array[i]<<"\n";
     }
-    myfile.close();*/
+    myfile.close();
 
     return 0;
 
@@ -981,7 +1145,7 @@ int main() {
 int main() {
     //TODO was ist das
     double width_band{std::numeric_limits<double>::infinity()};
-    double stride{4*settings::h};
+    double stride{2*settings::h};
     //double eps{1./1000};
     SubdomainData *subdomain_array{new SubdomainData[settings::total_num_processes]{}};
     //total size needed for heap for the lookup table
@@ -1057,7 +1221,7 @@ int main() {
 //exchange data
 //#pragma omp taskloop
             for (int i = 0; i < settings::total_num_processes; ++i) {
-                collect_overlapping_data(subdomain_array[i], std::ref(exchange_vector));
+                collect_overlapping_data1(subdomain_array[i], std::ref(exchange_vector));
             }
 //#pragma omp taskwait
 
