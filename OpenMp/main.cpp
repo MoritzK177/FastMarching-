@@ -700,6 +700,459 @@ int main(){
     return 0;
 }*/
 
+
+int main() {
+    //TODO was ist das
+    double width_band{std::numeric_limits<double>::infinity()};
+    double stride{2*settings::h};
+    double min_val_global = width_band;
+    double min_array[settings::total_num_processes];
+    int count_array[settings::total_num_processes];
+    int count_global =0;
+    bool flag = true;
+    double bound_band = width_band;
+    //double eps{1./1000};
+    //all the largest elements there get allocated with new
+    SubdomainData subdomain_array [settings::total_num_processes];
+    //alt:
+    //SubdomainData *subdomain_array{new SubdomainData[settings::total_num_processes]{}};
+    std::vector<std::vector<std::vector<ExchangeData>>> exchange_vector;
+    exchange_vector.resize(settings::total_num_processes);
+
+    //total size needed for heap for the lookup table
+    //setting domain offsets:
+    for(int x=0; x<settings::x_num_processes; ++x){
+        for(int y=0; y<settings::y_num_processes; ++y){
+            for(int z=0; z<settings::z_num_processes; ++z){
+
+                subdomain_array[process_index(x,y,z)].x_offset=x*(settings::x_local_grid_size -2);
+                subdomain_array[process_index(x,y,z)].y_offset=y*(settings::y_local_grid_size -2);
+                subdomain_array[process_index(x,y,z)].z_offset=z*(settings::z_local_grid_size -2);
+
+            }
+        }
+    }
+
+
+    //std::cout<<std::thread::hardware_concurrency()<<"\n";
+    //std::thread *thread_array{new std::thread[settings::total_num_processes]{}};
+    //std::array<std::thread,settings::total_num_processes > thread_array;
+    //thread_array.resize(settings::total_num_processes);
+    //INITIALIZE_INTERFACE
+
+    auto startTime = std::chrono::system_clock::now();
+    double startTimeMarch = 0;
+    std::cout<<"MARCH: " << startTimeMarch<<std::endl;
+#pragma omp parallel default(none) shared(subdomain_array, stride, width_band, exchange_vector, min_val_global, count_global, count_array, min_array, flag, bound_band)// startTimeMarch) //num_threads(4)
+    {
+//#pragma omp master
+//#pragma omp taskloop
+        //INITIALIZE HEAP AND SUBDOMAINS
+#pragma omp for
+        for (int i = 0; i < settings::total_num_processes; ++i) {
+            initialize_subdomain(subdomain_array[i]);
+            initialize_heap(subdomain_array[i]);
+        }
+//#pragma omp taskwait
+#pragma omp barrier
+//#pragma omp master
+        while (flag) {
+
+            //double min_array[settings::total_num_processes];
+            //int count_array[settings::total_num_processes];
+            //std::array <double,settings::total_num_processes> min_array;
+            //std::array <int, settings::total_num_processes> count_array;
+#pragma omp master
+            {
+                for (int i = 0; i < settings::total_num_processes; ++i) {
+                    count_array[i] = subdomain_array[i].count_new;
+                    int size = subdomain_array[i].h.get_size();
+                    if (subdomain_array[i].h.get_size() > 0) {
+                        //std::cout<<"Process: "<< i <<" minimum: "<< subdomain_array[i].h.getMin().weight<<std::endl;
+                        min_array[i] = subdomain_array[i].h.getMin().weight;
+                    } else min_array[i] = width_band;
+                }
+
+                //double *min_val_global = std::min_element(std::begin(min_array), std::end(min_array));
+                //double min_val_global = width_band;
+#pragma omp parallel for reduction(min:min_val_global)
+                for (int i = 0; i < settings::total_num_processes; ++i) {
+                    min_val_global = std::min(min_val_global, min_array[i]);
+                }
+                //int count_global =0;
+#pragma omp parallel for reduction(max:count_global)
+                for (int i = 0; i < settings::total_num_processes; ++i) {
+                    count_global = std::max(count_global, count_array[i]);
+                }
+                //std::cout << "MIN VAL GLOBAL: "<< *min_val_global<<std::endl;
+                //int *count_global = std::max_element(std::begin(count_array), std::end(count_array));
+
+                if ((min_val_global >= width_band) && (count_global == 0)) {
+                    flag = false;
+                }
+            bound_band = std::min(min_val_global + stride, width_band);
+            count_global = 0;
+            min_val_global = width_band;
+
+            }
+            //std::cout << "Count GLOBAL: "<< count_global<<std::endl;
+            //march_band
+            //auto march_timer_start = std::chrono::system_clock::now();
+//#pragma omp taskloop
+#pragma omp barrier
+#pragma omp for
+            for (int i = 0; i < 2*settings::total_num_processes; ++i) {
+                if(i<settings::total_num_processes) {
+                    march_narrow_band(subdomain_array[i], bound_band);
+                }
+                else{
+                    exchange_vector[i%settings::total_num_processes].resize(26);
+                }
+            }
+#pragma omp barrier
+//exchange data
+//#pragma omp taskloop
+#pragma omp for
+            for (int i = 0; i < settings::total_num_processes; ++i) {
+                collect_overlapping_data1(subdomain_array[i], std::ref(exchange_vector));
+            }
+#pragma omp barrier
+//#pragma omp taskwait
+
+
+            //integrate data
+//#pragma omp taskloop
+#pragma omp for
+            for (int i = 0; i < settings::total_num_processes; ++i) {
+                integrate_overlapping_data(subdomain_array[i], bound_band, std::ref(exchange_vector[i]));
+                exchange_vector[i].clear();
+            }
+//#pragma omp taskwait
+#pragma omp barrier
+            //for (int i = 0; i < settings::total_num_processes; ++i) {
+            //    exchange_vector[i].clear();
+            //}
+
+            //march_band
+
+
+//#pragma omp taskloop
+            //march_timer_start = std::chrono::system_clock::now();
+#pragma omp for
+            for (int i = 0; i < settings::total_num_processes; ++i) {
+                march_narrow_band(subdomain_array[i], bound_band);
+            }
+#pragma omp barrier
+//#pragma omp taskwait
+            // = std::chrono::system_clock::now();
+            //elapsed_seconds = march_timer_end-march_timer_start;
+            //startTimeMarch += elapsed_seconds.count();
+
+            //}
+        }
+    }
+
+
+    auto endTime = std::chrono::system_clock::now();
+    std::chrono::duration<double> elapsed_seconds = endTime - startTime;
+
+    std::cout<<"STRIDE: "<< stride<<std::endl;
+    std::cout<<"MARCH: " << startTimeMarch<<std::endl;
+    std::cout<<"TOTAL: "<< elapsed_seconds.count()<<std::endl;
+    //delete[] thread_array;
+
+
+
+    double* weight_array{new double[settings::total_global_grid_size]{}};
+    for(int x =0; x<settings::x_global_grid_size;++x){
+        for(int y =0; y<settings::y_global_grid_size;++y){
+            for(int z =0; z<settings::z_global_grid_size;++z){
+
+                int process_xid = x/(settings::x_local_grid_size-2);
+                int process_yid = y/(settings::y_local_grid_size-2);
+                int process_zid = z/(settings::z_local_grid_size-2);
+                int x_local_coord = (x % (settings::x_local_grid_size-2))+1;
+                int y_local_coord = (y % (settings::y_local_grid_size-2))+1;
+                int z_local_coord = (z % (settings::z_local_grid_size-2))+1;
+                //std::cout<<"X-id: "<< process_xid<<" Y-id: "<<process_yid<<" Z-id: "<<process_zid<<std::endl;
+                //std::cout<<"X: "<< x_local_coord<<" Y: "<<y_local_coord<<" Z: "<<z_local_coord<<std::endl;
+                //std::cout<<"RESULT: "<<subdomain_array[process_index(process_xid, process_yid,process_zid)].weight_array[x_local_coord, y_local_coord, z_local_coord]<<std::endl;
+                weight_array[global_arr_index(x,y,z)]= subdomain_array[process_index(process_xid, process_yid,process_zid)].weight_array[local_arr_index(x_local_coord, y_local_coord, z_local_coord)];
+
+            }
+
+        }
+    }
+
+    int count{0};
+    for(int i=0; i<settings::total_num_processes; ++i){
+        for(int x=1; x<settings::x_local_grid_size-1; ++x){
+            for(int y=1; y<settings::y_local_grid_size-1;++y){
+                for(int z=1;z<settings::z_local_grid_size-1;++z){
+                    int j = local_arr_index(x,y,z);
+                    double c = subdomain_array[i].weight_array[j];
+                    if(subdomain_array[i].weight_array[j]<1000000) {
+                        ++count;
+                        //std::cout << "STATUS: " << subdomain_array[i].status_array[j] << std::endl;
+                        //std::cout << "WEIGHT: " << subdomain_array[i].weight_array[j] << std::endl;
+                        //std::cout << "SPEED: " << subdomain_array[i].speed_array[j] << "\n" << std::endl;
+                    }
+                }
+            }
+        }
+    }
+    std::cout<<count<< std::endl;
+
+    //for(int i=0; i < settings::total_global_grid_size;++i){
+    //    std::cout << "WEIGHT: " << weight_array[i] << std::endl;
+    //}
+
+    std::ofstream myfile;
+    myfile.open("barrier.txt");
+    myfile << "Dimension information\n"<<settings::x_global_grid_size <<"\n"<<settings::y_global_grid_size<<"\n"<<settings::z_global_grid_size<<"\n";
+    myfile << "Mask information\n";
+    for(int x=0; x<settings::x_global_grid_size; ++x){
+        for(int y=0; y<settings::y_global_grid_size; ++y){
+            for(int z=0; z<settings::z_global_grid_size; ++z){
+                myfile << in_mask(x,y,z)<<"\n";
+            }
+        }
+    }
+
+    myfile<<"Result information\n";
+    for ( int i =0; i< settings::total_global_grid_size;++i)
+    {
+        myfile << weight_array[i]<<"\n";
+    }
+    myfile.close();
+
+    return 0;
+
+}
+
+/*
+int main() {
+    //TODO was ist das
+    double width_band{std::numeric_limits<double>::infinity()};
+    double stride{2*settings::h};
+    double min_val_global = width_band;
+    double min_array[settings::total_num_processes];
+    int count_array[settings::total_num_processes];
+    int count_global =0;
+    //double eps{1./1000};
+    //all the largest elements there get allocated with new
+    SubdomainData subdomain_array [settings::total_num_processes];
+    //alt:
+    //SubdomainData *subdomain_array{new SubdomainData[settings::total_num_processes]{}};
+    std::vector<std::vector<std::vector<ExchangeData>>> exchange_vector;
+    exchange_vector.resize(settings::total_num_processes);
+
+    //total size needed for heap for the lookup table
+    //setting domain offsets:
+    for(int x=0; x<settings::x_num_processes; ++x){
+        for(int y=0; y<settings::y_num_processes; ++y){
+            for(int z=0; z<settings::z_num_processes; ++z){
+
+                subdomain_array[process_index(x,y,z)].x_offset=x*(settings::x_local_grid_size -2);
+                subdomain_array[process_index(x,y,z)].y_offset=y*(settings::y_local_grid_size -2);
+                subdomain_array[process_index(x,y,z)].z_offset=z*(settings::z_local_grid_size -2);
+
+            }
+        }
+    }
+
+
+    //std::cout<<std::thread::hardware_concurrency()<<"\n";
+    //std::thread *thread_array{new std::thread[settings::total_num_processes]{}};
+    //std::array<std::thread,settings::total_num_processes > thread_array;
+    //thread_array.resize(settings::total_num_processes);
+    //INITIALIZE_INTERFACE
+
+    auto startTime = std::chrono::system_clock::now();
+    double startTimeMarch = 0;
+    std::cout<<"MARCH: " << startTimeMarch<<std::endl;
+        //INITIALIZE HEAP AND SUBDOMAINS
+#pragma omp parallel for
+        for (int i = 0; i < settings::total_num_processes; ++i) {
+            initialize_subdomain(subdomain_array[i]);
+            initialize_heap(subdomain_array[i]);
+        }
+
+        while (true) {
+            //double min_array[settings::total_num_processes];
+            //int count_array[settings::total_num_processes];
+            //std::array <double,settings::total_num_processes> min_array;
+            //std::array <int, settings::total_num_processes> count_array;
+            for (int i = 0; i < settings::total_num_processes; ++i) {
+                count_array[i] = subdomain_array[i].count_new;
+                int size = subdomain_array[i].h.get_size();
+                if (subdomain_array[i].h.get_size() > 0) {
+                    //std::cout<<"Process: "<< i <<" minimum: "<< subdomain_array[i].h.getMin().weight<<std::endl;
+                    min_array[i] = subdomain_array[i].h.getMin().weight;
+                } else min_array[i] = width_band;
+            }
+
+#pragma omp parallel for reduction(min:min_val_global)
+            for (int i=0; i<settings::total_num_processes;++i){
+                min_val_global = std::min(min_val_global, min_array[i]);
+            }
+
+#pragma omp parallel for reduction(max:count_global)
+            for (int i=0; i<settings::total_num_processes;++i){
+                count_global = std::max(count_global, count_array[i]);
+            }
+            //std::cout << "MIN VAL GLOBAL: "<< *min_val_global<<std::endl;
+            //int *count_global = std::max_element(std::begin(count_array), std::end(count_array));
+            if ((min_val_global >= width_band) && (count_global == 0)) {
+                break;
+            }
+            double bound_band = std::min(min_val_global + stride, width_band);
+            min_val_global = width_band;
+            count_global = 0;
+
+            //std::cout << "Count GLOBAL: "<< count_global<<std::endl;
+            //march_band
+            //auto march_timer_start = std::chrono::system_clock::now();
+//#pragma omp taskloop
+#pragma omp parallel default(none) shared(subdomain_array, stride, width_band, exchange_vector, bound_band)
+    {
+#pragma omp for
+            for (int i = 0; i < 2 * settings::total_num_processes; ++i) {
+                if (i < settings::total_num_processes) {
+                    march_narrow_band(subdomain_array[i], bound_band);
+                } else {
+                    exchange_vector[i % settings::total_num_processes].resize(26);
+                }
+            }
+#pragma omp barrier
+            //auto march_timer_end = std::chrono::system_clock::now();
+            //std::chrono::duration<double> elapsed_seconds = march_timer_end-march_timer_start;
+            //startTimeMarch += elapsed_seconds.count();
+            //std::cout<<"MARCH: " << (march_timer_end-march_timer_start).count()<<std::endl;
+
+
+            //for (int i = 0; i < settings::total_num_processes; ++i) {
+            //   exchange_vector[i].resize(26);
+            //}
+
+//exchange data
+#pragma omp for
+            for (int i = 0; i < settings::total_num_processes; ++i) {
+                collect_overlapping_data1(subdomain_array[i], std::ref(exchange_vector));
+            }
+#pragma omp barrier
+
+            //integrate data
+//#pragma omp taskloop
+#pragma omp for
+            for (int i = 0; i < settings::total_num_processes; ++i) {
+                integrate_overlapping_data(subdomain_array[i], bound_band, std::ref(exchange_vector[i]));
+                exchange_vector[i].clear();
+            }
+#pragma omp barrier
+//#pragma omp taskwait
+
+            //for (int i = 0; i < settings::total_num_processes; ++i) {
+            //    exchange_vector[i].clear();
+            //}
+
+            //march_band
+
+            //march_timer_start = std::chrono::system_clock::now();
+#pragma omp for
+            for (int i = 0; i < settings::total_num_processes; ++i) {
+                march_narrow_band(subdomain_array[i], bound_band);
+            }
+#pragma omp barrier
+//#pragma omp taskwait
+            // = std::chrono::system_clock::now();
+            //elapsed_seconds = march_timer_end-march_timer_start;
+            //startTimeMarch += elapsed_seconds.count();
+
+            //}
+        }
+
+        }
+
+
+    auto endTime = std::chrono::system_clock::now();
+    std::chrono::duration<double> elapsed_seconds = endTime - startTime;
+
+    std::cout<<"STRIDE: "<< stride<<std::endl;
+    std::cout<<"MARCH: " << startTimeMarch<<std::endl;
+    std::cout<<"TOTAL: "<< elapsed_seconds.count()<<std::endl;
+    //delete[] thread_array;
+
+
+
+    double* weight_array{new double[settings::total_global_grid_size]{}};
+    for(int x =0; x<settings::x_global_grid_size;++x){
+        for(int y =0; y<settings::y_global_grid_size;++y){
+            for(int z =0; z<settings::z_global_grid_size;++z){
+
+                int process_xid = x/(settings::x_local_grid_size-2);
+                int process_yid = y/(settings::y_local_grid_size-2);
+                int process_zid = z/(settings::z_local_grid_size-2);
+                int x_local_coord = (x % (settings::x_local_grid_size-2))+1;
+                int y_local_coord = (y % (settings::y_local_grid_size-2))+1;
+                int z_local_coord = (z % (settings::z_local_grid_size-2))+1;
+                //std::cout<<"X-id: "<< process_xid<<" Y-id: "<<process_yid<<" Z-id: "<<process_zid<<std::endl;
+                //std::cout<<"X: "<< x_local_coord<<" Y: "<<y_local_coord<<" Z: "<<z_local_coord<<std::endl;
+                //std::cout<<"RESULT: "<<subdomain_array[process_index(process_xid, process_yid,process_zid)].weight_array[x_local_coord, y_local_coord, z_local_coord]<<std::endl;
+                weight_array[global_arr_index(x,y,z)]= subdomain_array[process_index(process_xid, process_yid,process_zid)].weight_array[local_arr_index(x_local_coord, y_local_coord, z_local_coord)];
+
+            }
+
+        }
+    }
+
+    int count{0};
+    for(int i=0; i<settings::total_num_processes; ++i){
+        for(int x=1; x<settings::x_local_grid_size-1; ++x){
+            for(int y=1; y<settings::y_local_grid_size-1;++y){
+                for(int z=1;z<settings::z_local_grid_size-1;++z){
+                    int j = local_arr_index(x,y,z);
+                    double c = subdomain_array[i].weight_array[j];
+                    if(subdomain_array[i].weight_array[j]<1000000) {
+                        ++count;
+                        //std::cout << "STATUS: " << subdomain_array[i].status_array[j] << std::endl;
+                        //std::cout << "WEIGHT: " << subdomain_array[i].weight_array[j] << std::endl;
+                        //std::cout << "SPEED: " << subdomain_array[i].speed_array[j] << "\n" << std::endl;
+                    }
+                }
+            }
+        }
+    }
+    std::cout<<count<< std::endl;
+
+    //for(int i=0; i < settings::total_global_grid_size;++i){
+    //    std::cout << "WEIGHT: " << weight_array[i] << std::endl;
+    //}
+
+    std::ofstream myfile;
+    myfile.open("barrier.txt");
+    myfile << "Dimension information\n"<<settings::x_global_grid_size <<"\n"<<settings::y_global_grid_size<<"\n"<<settings::z_global_grid_size<<"\n";
+    myfile << "Mask information\n";
+    for(int x=0; x<settings::x_global_grid_size; ++x){
+        for(int y=0; y<settings::y_global_grid_size; ++y){
+            for(int z=0; z<settings::z_global_grid_size; ++z){
+                myfile << in_mask(x,y,z)<<"\n";
+            }
+        }
+    }
+
+    myfile<<"Result information\n";
+    for ( int i =0; i< settings::total_global_grid_size;++i)
+    {
+        myfile << weight_array[i]<<"\n";
+    }
+    myfile.close();
+
+    return 0;
+
+}*/
+
+/*
 int main() {
     //TODO was ist das
     double width_band{std::numeric_limits<double>::infinity()};
@@ -736,16 +1189,22 @@ int main() {
     auto startTime = std::chrono::system_clock::now();
     double startTimeMarch = 0;
     std::cout<<"MARCH: " << startTimeMarch<<std::endl;
+
+
 #pragma omp parallel default(none) shared(subdomain_array, stride, width_band, exchange_vector)// startTimeMarch) //num_threads(4)
     {
+
 #pragma omp master
+#pragma omp parallel for
+        for (int i = 0; i < settings::total_num_processes; ++i) {
+            initialize_subdomain(subdomain_array[i]);
+            initialize_heap(subdomain_array[i]);
+        }
+
+
 //#pragma omp taskloop
             //INITIALIZE HEAP AND SUBDOMAINS
-#pragma omp parallel for
-            for (int i = 0; i < settings::total_num_processes; ++i) {
-                initialize_subdomain(subdomain_array[i]);
-                initialize_heap(subdomain_array[i]);
-            }
+
 //#pragma omp taskwait
 
 #pragma omp master
@@ -847,7 +1306,6 @@ int main() {
         }
 }
 
-
     auto endTime = std::chrono::system_clock::now();
     std::chrono::duration<double> elapsed_seconds = endTime - startTime;
 
@@ -923,8 +1381,184 @@ int main() {
 
     return 0;
 
-}
+}*/
 
+/*
+int main() {
+    //TODO was ist das
+    double width_band{std::numeric_limits<double>::infinity()};
+    double stride{2*settings::h};
+    double min_val_global = width_band;
+    double min_array[settings::total_num_processes];
+    int count_array[settings::total_num_processes];
+    int count_global =0;
+    bool flag = true;
+    //double eps{1./1000};
+    //all the largest elements there get allocated with new
+    SubdomainData subdomain_array [settings::total_num_processes];
+    //alt:
+    //SubdomainData *subdomain_array{new SubdomainData[settings::total_num_processes]{}};
+    std::vector<std::vector<std::vector<ExchangeData>>> exchange_vector;
+    exchange_vector.resize(settings::total_num_processes);
+
+    //total size needed for heap for the lookup table
+    //setting domain offsets:
+    for(int x=0; x<settings::x_num_processes; ++x){
+        for(int y=0; y<settings::y_num_processes; ++y){
+            for(int z=0; z<settings::z_num_processes; ++z){
+
+                subdomain_array[process_index(x,y,z)].x_offset=x*(settings::x_local_grid_size -2);
+                subdomain_array[process_index(x,y,z)].y_offset=y*(settings::y_local_grid_size -2);
+                subdomain_array[process_index(x,y,z)].z_offset=z*(settings::z_local_grid_size -2);
+
+            }
+        }
+    }
+
+
+    //std::cout<<std::thread::hardware_concurrency()<<"\n";
+    //std::thread *thread_array{new std::thread[settings::total_num_processes]{}};
+    //std::array<std::thread,settings::total_num_processes > thread_array;
+    //thread_array.resize(settings::total_num_processes);
+    //INITIALIZE_INTERFACE
+
+    auto startTime = std::chrono::system_clock::now();
+    double startTimeMarch = 0;
+    std::cout<<"MARCH: " << startTimeMarch<<std::endl;
+    //INITIALIZE HEAP AND SUBDOMAINS
+#pragma omp parallel for
+    for (int i = 0; i < settings::total_num_processes; ++i) {
+        initialize_subdomain(subdomain_array[i]);
+        initialize_heap(subdomain_array[i]);
+    }
+
+    while (flag) {
+        //double min_array[settings::total_num_processes];
+        //int count_array[settings::total_num_processes];
+        //std::array <double,settings::total_num_processes> min_array;
+        //std::array <int, settings::total_num_processes> count_array;
+        for (int i = 0; i < settings::total_num_processes; ++i) {
+            count_array[i] = subdomain_array[i].count_new;
+            int size = subdomain_array[i].h.get_size();
+            if (subdomain_array[i].h.get_size() > 0) {
+                //std::cout<<"Process: "<< i <<" minimum: "<< subdomain_array[i].h.getMin().weight<<std::endl;
+                min_array[i] = subdomain_array[i].h.getMin().weight;
+            } else min_array[i] = width_band;
+        }
+
+#pragma omp parallel for reduction(min:min_val_global)
+        for (int i=0; i<settings::total_num_processes;++i){
+            min_val_global = std::min(min_val_global, min_array[i]);
+        }
+
+#pragma omp parallel for reduction(max:count_global)
+        for (int i=0; i<settings::total_num_processes;++i){
+            count_global = std::max(count_global, count_array[i]);
+        }
+        //std::cout << "MIN VAL GLOBAL: "<< *min_val_global<<std::endl;
+        //int *count_global = std::max_element(std::begin(count_array), std::end(count_array));
+        if ((min_val_global >= width_band) && (count_global == 0)) {
+            flag= false;
+        }
+        double bound_band = std::min(min_val_global + stride, width_band);
+        min_val_global = width_band;
+        count_global = 0;
+
+#pragma omp parallel for
+            for (int i = 0; i < 2 * settings::total_num_processes; ++i) {
+                if (i < settings::total_num_processes) {
+                    march_narrow_band(subdomain_array[i], bound_band);
+                } else {
+                    exchange_vector[i % settings::total_num_processes].resize(26);
+                }
+            }
+//exchange data
+#pragma omp parallel for
+            for (int i = 0; i < settings::total_num_processes; ++i) {
+                collect_overlapping_data1(subdomain_array[i], std::ref(exchange_vector));
+            }
+
+            //integrate data
+//#pragma omp taskloop
+#pragma omp parallel for
+            for (int i = 0; i < settings::total_num_processes; ++i) {
+                integrate_overlapping_data(subdomain_array[i], bound_band, std::ref(exchange_vector[i]));
+                exchange_vector[i].clear();
+            }
+
+#pragma omp parallel for
+            for (int i = 0; i < settings::total_num_processes; ++i) {
+                march_narrow_band(subdomain_array[i], bound_band);
+            }
+//#pragma omp taskwait
+            // = std::chrono::system_clock::now();
+            //elapsed_seconds = march_timer_end-march_timer_start;
+            //startTimeMarch += elapsed_seconds.count();
+
+            //}
+        }
+
+
+
+
+    auto endTime = std::chrono::system_clock::now();
+    std::chrono::duration<double> elapsed_seconds = endTime - startTime;
+
+    std::cout<<"STRIDE: "<< stride<<std::endl;
+    std::cout<<"MARCH: " << startTimeMarch<<std::endl;
+    std::cout<<"TOTAL: "<< elapsed_seconds.count()<<std::endl;
+    //delete[] thread_array;
+
+
+
+    double* weight_array{new double[settings::total_global_grid_size]{}};
+    for(int x =0; x<settings::x_global_grid_size;++x){
+        for(int y =0; y<settings::y_global_grid_size;++y){
+            for(int z =0; z<settings::z_global_grid_size;++z){
+
+                int process_xid = x/(settings::x_local_grid_size-2);
+                int process_yid = y/(settings::y_local_grid_size-2);
+                int process_zid = z/(settings::z_local_grid_size-2);
+                int x_local_coord = (x % (settings::x_local_grid_size-2))+1;
+                int y_local_coord = (y % (settings::y_local_grid_size-2))+1;
+                int z_local_coord = (z % (settings::z_local_grid_size-2))+1;
+                //std::cout<<"X-id: "<< process_xid<<" Y-id: "<<process_yid<<" Z-id: "<<process_zid<<std::endl;
+                //std::cout<<"X: "<< x_local_coord<<" Y: "<<y_local_coord<<" Z: "<<z_local_coord<<std::endl;
+                //std::cout<<"RESULT: "<<subdomain_array[process_index(process_xid, process_yid,process_zid)].weight_array[x_local_coord, y_local_coord, z_local_coord]<<std::endl;
+                weight_array[global_arr_index(x,y,z)]= subdomain_array[process_index(process_xid, process_yid,process_zid)].weight_array[local_arr_index(x_local_coord, y_local_coord, z_local_coord)];
+
+            }
+
+        }
+    }
+
+    int count{0};
+    for(int i=0; i<settings::total_num_processes; ++i){
+        for(int x=1; x<settings::x_local_grid_size-1; ++x){
+            for(int y=1; y<settings::y_local_grid_size-1;++y){
+                for(int z=1;z<settings::z_local_grid_size-1;++z){
+                    int j = local_arr_index(x,y,z);
+                    double c = subdomain_array[i].weight_array[j];
+                    if(subdomain_array[i].weight_array[j]<1000000) {
+                        ++count;
+                        //std::cout << "STATUS: " << subdomain_array[i].status_array[j] << std::endl;
+                        //std::cout << "WEIGHT: " << subdomain_array[i].weight_array[j] << std::endl;
+                        //std::cout << "SPEED: " << subdomain_array[i].speed_array[j] << "\n" << std::endl;
+                    }
+                }
+            }
+        }
+    }
+    std::cout<<count<< std::endl;
+
+    //for(int i=0; i < settings::total_global_grid_size;++i){
+    //    std::cout << "WEIGHT: " << weight_array[i] << std::endl;
+    //}
+
+
+    return 0;
+
+}*/
 
 /*
 int main() {
@@ -1015,7 +1649,7 @@ int main() {
 
         auto startTime_march = std::chrono::system_clock::now();
         //march_band
-        #pragma omp parallel for //num_threads(8)
+        #pragma omp parallel for schedule(static)//num_threads(8)
         for(int i=0; i<settings::total_num_processes; ++i){
             march_narrow_band(subdomain_array[i], bound_band);
         }
@@ -1028,24 +1662,20 @@ int main() {
         exchange_vector.resize(settings::total_num_processes);
 
 
-
-        for(int i=0; i< settings::total_num_processes; ++i){
-            exchange_vector[i].resize(26);
+#pragma omp parallel for schedule(dynamic)
+        for (int i = 0; i < 2*settings::total_num_processes; ++i) {
+            if(i<settings::total_num_processes) {
+                march_narrow_band(subdomain_array[i], bound_band);
+            }
+            else{
+                exchange_vector[i%settings::total_num_processes].resize(26);
+            }
         }
-
-        auto startTime_collect = std::chrono::system_clock::now();
-        //exchange data
-        //#pragma omp parallel for num_threads(8)
-        for(int i=0; i<settings::total_num_processes; ++i){
-            collect_overlapping_data(subdomain_array[i], std::ref(exchange_vector));
-        }
-        auto endTime_collect = std::chrono::system_clock::now();
-        elapsed_seconds_collect += endTime_collect - startTime_collect;
 
         auto startTime_integrate = std::chrono::system_clock::now();
 
         //integrate data
-        #pragma omp parallel for //num_threads(8)
+        #pragma omp parallel for schedule(dynamic)//num_threads(8)
         for(int i=0; i<settings::total_num_processes; ++i){
             integrate_overlapping_data(subdomain_array[i],bound_band, std::ref(exchange_vector[i]));
         }
@@ -1054,7 +1684,7 @@ int main() {
 
         startTime_march = std::chrono::system_clock::now();
         //march_band
-        #pragma omp parallel for //num_threads(8)
+        #pragma omp parallel for schedule(dynamic)//num_threads(8)
         for(int i=0; i<settings::total_num_processes; ++i){
             march_narrow_band(subdomain_array[i], bound_band);
         }
