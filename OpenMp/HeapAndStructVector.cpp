@@ -11,6 +11,7 @@
 #include <array>
 #include <vector>
 #include <cassert>
+#include "settings.h"
 int local_arr_index(int, int, int);//forward declaration
 
 // Constructor: Builds a heap from a given array a[] of given size
@@ -19,6 +20,7 @@ MinHeap::MinHeap(const int cap)
     heap_size = 0;
     capacity = cap;
     std::vector<WeightedPoint> m_harr;
+    //m_harr.reserve(settings::total_local_grid_size);
     table = new int[cap];
     for(int i=0; i<cap; ++i)
     {
