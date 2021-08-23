@@ -107,6 +107,8 @@ struct SubdomainData
     //double weight_array [settings::total_local_grid_size];
     double *weight_array{new double[settings::total_local_grid_size]{}};
     MinHeap h{settings::total_local_grid_size};
+    std::vector<int> node_neighbors;
+    std::vector<int> process_neighbors;
 
 };
 struct ExchangeData
