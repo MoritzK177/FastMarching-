@@ -108,8 +108,9 @@ struct SubdomainData
     double *weight_array{new double[settings::total_local_grid_size]{}};
     MinHeap h{settings::total_local_grid_size};
     std::vector<int> node_neighbors;
+    //each entry i in index_in_neighbor_array corresponds to 3*i + {0,1,2} in prodess_neighbors
     std::vector<int> process_neighbors;
-
+    std::vector<int> index_in_neighbor;
 };
 struct ExchangeData
 {
