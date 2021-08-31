@@ -42,9 +42,10 @@ bool in_barrier(int x, int y, int z)
 //speed and mask functions
 double speed_funct(int x, int y, int z)
 {
-    //return 1+ 0.5*std::sin(20*M_PI*x)*std::sin(20*M_PI*y)*std::sin(20*M_PI*z);
+    return 1+ 0.5*std::sin(20*M_PI*settings::h*x)*std::sin(20*M_PI*settings::h*y)*std::sin(20*M_PI*settings::h*z);
+    //return (1- 0.99*std::sin(2*M_PI*settings::h*x)*std::sin(2*M_PI*settings::h*y)*std::sin(2*M_PI*settings::h*z));
     //return 0.001*(pow(std::sin(x),2)+pow(std::cos(y),2)+0.1);
-    return 1.0;
+    //return 1.0;
     //if(in_barrier(x,y,z)) return 0;
     //else return 1;
 }
@@ -60,10 +61,10 @@ bool in_mask(int x, int y , int z)
     //bool in_cube = x*settings::h<=0.875&&x*settings::h >=0.625&& y*settings::h<=0.875&&y*settings::h >=0.625&& z*settings::h<=0.875&&z*settings::h >=0.625;
     //return in_ball ||in_cube;
     //return x== settings::x_global_grid_size/2&&y== settings::y_global_grid_size/2&&z== settings::z_global_grid_size/2;
-    //bool in_ball2= (pow(x*settings::h -0.5,2)+ pow(y*settings::h -0.5,2)+pow(z*settings::h -0.5,2))<=1.0/16;
-    //return in_ball2;
-    bool in_cube2 = (x==63 ||x==64)&&(y==63 ||y==64)&&(z==63||z==64);
-    return in_cube2;
+    bool in_ball2= (pow(x*settings::h -0.5,2)+ pow(y*settings::h -0.5,2)+pow(z*settings::h -0.5,2))<=1.0/16;
+    return in_ball2;
+    //bool in_cube2 = (x==63 ||x==64)&&(y==63 ||y==64)&&(z==63||z==64);
+    //return in_cube2;
 }
 
 //Helper function to return the respective array indices
@@ -1117,6 +1118,7 @@ int main() {
     auto startTime = std::chrono::system_clock::now();
     double startTimeMarch = 0;
     std::cout << "MARCH: " << startTimeMarch << std::endl;
+    omp_set_num_threads(48);
 #pragma omp parallel default(none) shared(subdomain_array, stride, width_band, exchange_vector, min_val_global, count_global, count_array, min_array, flag, bound_band)// startTimeMarch) //num_threads(4)
 #pragma omp master
 {
@@ -1242,7 +1244,6 @@ int main() {
                 weight_array[global_arr_index(x, y, z)] = subdomain_array[process_index(process_xid, process_yid,
                                                                                         process_zid)].weight_array[local_arr_index(
                         x_local_coord, y_local_coord, z_local_coord)];
-
             }
 
         }
@@ -1255,7 +1256,7 @@ int main() {
                 for (int z = 1; z < settings::z_local_grid_size - 1; ++z) {
                     int j = local_arr_index(x, y, z);
                     double c = subdomain_array[i].weight_array[j];
-                    if (subdomain_array[i].weight_array[j] < 100) {
+                    if (subdomain_array[i].weight_array[j] < 100000) {
                         ++count;
                         //std::cout << "STATUS: " << subdomain_array[i].status_array[j] << std::endl;
                         //std::cout << "WEIGHT: " << subdomain_array[i].weight_array[j] << std::endl;
@@ -1271,8 +1272,8 @@ int main() {
     //    std::cout << "WEIGHT: " << weight_array[i] << std::endl;
     //}
 
-    std::ofstream myfile;
-    myfile.open("barrier.txt");
+    /*std::ofstream myfile;
+    myfile.open("anisotropic2.txt");
     myfile << "Dimension information\n" << settings::x_global_grid_size << "\n" << settings::y_global_grid_size << "\n"
            << settings::z_global_grid_size << "\n";
     myfile << "Mask information\n";
@@ -1288,7 +1289,7 @@ int main() {
     for (int i = 0; i < settings::total_global_grid_size; ++i) {
         myfile << weight_array[i] << "\n";
     }
-    myfile.close();
+    myfile.close();*/
 
     return 0;
 }
