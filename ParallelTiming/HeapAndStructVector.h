@@ -83,4 +83,40 @@ public:
     void swap(WeightedPoint *x, WeightedPoint *y);
 };
 
+//A simple representation for the data of the Processes
+//TODO ALS ENUM
+/* legend of the statuses:
+ * 0 = FAR
+ * 1 = BAND_NEW
+ * 2 = BAND_OLD
+ * 3 = KNOWN_FIX
+ * 4 = KNOWN_NEW
+ * 5 = KNOWN_OLD
+ * */
+
+struct SubdomainData
+{
+    int x_offset{0};
+    int y_offset{0};
+    int z_offset{0};
+    int count_new{0};
+    //char status_array [settings::total_local_grid_size];
+    char *status_array{new char[settings::total_local_grid_size]{}};
+    //double speed_array [settings::total_local_grid_size];
+    double *speed_array{new double[settings::total_local_grid_size]{}};
+    //double weight_array [settings::total_local_grid_size];
+    double *weight_array{new double[settings::total_local_grid_size]{}};
+    MinHeap h{settings::total_local_grid_size};
+    std::vector<int> node_neighbors;
+    //each entry i in index_in_neighbor_array corresponds to 3*i + {0,1,2} in prodess_neighbors
+    std::vector<int> process_neighbors;
+    std::vector<int> index_in_neighbor;
+};
+struct ExchangeData
+{
+    int x{-1};
+    int y{-1};
+    int z{-1};
+    double value{std::numeric_limits<double>::infinity()};
+};
 #endif //FASTMARCHINGPARALLEL1_HEAPANDSTRUCTVECTOR_H
